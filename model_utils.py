@@ -22,7 +22,7 @@ conversations = json.load(open(datapath + 'MovieSent.json', 'r'))
 movie_ids = json.load(open(datapath + 'films_rt_ids.json', 'r'))
 movies_features = json.load(open(datapath + 'films_features.json', 'r'))
 try:
-    critics_reviews = pd.read_table(datapath+'reviews.tsv').drop(['fresh'], axis=1).dropna()
+    critics_reviews = pd.read_table(datapath+'reviews.tsv.tar.gz', compression='gzip').drop(['fresh'], axis=1).dropna()
 except FileNotFoundError:
     logger.error('Critics reviews not found. Please, run `scraping_critics.py`')
     exit()
