@@ -1,11 +1,8 @@
-import json
-import logging
+import argparse
 import os
 import re
-import sys
 import time
 import traceback
-import random
 
 import numpy as np
 import pandas as pd
@@ -13,19 +10,9 @@ import requests
 from bs4 import BeautifulSoup
 from requests import TooManyRedirects
 from tqdm import tqdm
-from whoosh import fields, index
+from whoosh import index
 
-datapath = os.path.dirname(os.path.abspath(sys.argv[0])) + '/data/'
-movie_ids = json.load(open(datapath + 'films_rt_ids.json', 'r'))
-
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(asctime)s - %(message)s', datefmt='%H:%M:%S')
-logger = logging.getLogger()
-
-schema = fields.Schema(movie_id=fields.KEYWORD(stored=True, scorable=True),
-                critic_id=fields.KEYWORD(stored=True, scorable=True),
-                score=fields.NUMERIC(stored=True),
-                review=fields.TEXT(stored=True),
-                freshness=fields.KEYWORD(scorable=True))
+from model_utils import datapath, logger, movie_ids, schema
 
 reverse_scores = {1: ['*', 'E+', 'E', 'E-', 'F+', 'F', 'F-'],
                   2: ['**', 'D+', 'D PLUS', 'D', 'D-'],
@@ -129,10 +116,9 @@ def indexing(df, index_name=datapath+'index'):
     writer.commit()
 
 
-if __name__ == '__main__':
-
+def scrape_reviews():
     critics = []
-    movie_ids = {k: v for k, v in random.sample(movie_ids.items(), 2)}
+    movie_ids = {k: v for k, v in movie_ids.items()}
     for film in tqdm(movie_ids):
         critics += get_critics_from_movie(film)
 
@@ -142,7 +128,7 @@ if __name__ == '__main__':
     reviews = []
     open(datapath+'failed_critics', 'w').close()
     logger.info(f'Crawling reviews from {len(critics)} critics')
-    for critic in tqdm(critics[:2]):
+    for critic in tqdm(critics):
         reviews += get_reviews_for_critic(critic)
 
     failed_critics = open(datapath+'failed_critics', 'r').read().split('\n')
@@ -163,7 +149,7 @@ if __name__ == '__main__':
     df_all_reviews = df_all_reviews[~df_all_reviews['review_lower'].str.startswith('click to ')]
     df_all_reviews = df_all_reviews[~df_all_reviews['review_lower'].str.startswith('click for ')]
     df_all_reviews = df_all_reviews[~df_all_reviews['review_lower'].str.startswith('full review ')]
-    df_all_reviews.drop('review_lower', axis=1).to_csv(datapath + 'reviews.tsv', sep='\t', index=False)
+    df_all_reviews.drop('review_lower', axis=1).to_csv(datapath + 'reviews.tsv.gz', sep='\t', index=False)
 
     groupped = df_all_reviews.groupby('critic_id')
     logger.info(f"Total critics: {df_all_reviews['critic_id'].nunique()}")
@@ -171,5 +157,18 @@ if __name__ == '__main__':
     logger.info(f"Number of movies: {len(df_all_reviews.groupby('movie_id'))}")
     logger.info(f'Median of reviews per critic: {np.median([len(i[1]) for i in groupped])}')
     logger.info(f'Mean of reviews per critic: {np.mean([len(i[1]) for i in groupped])}')
+
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-i', '--index',
+                        help='only index the reviews without rescraping',
+                        action='store_true')
+    args = parser.parse_args()
+
+        if not os.path.exists(datapath+'reviews.tsv.gz') or not args.index:
+        scrape_reviews()
+    df_all_reviews = pd.read_table(datapath+'reviews.tsv.gz')
 
     indexing(df_all_reviews)

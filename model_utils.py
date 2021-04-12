@@ -4,7 +4,6 @@ import math
 import os
 import sys
 import time
-import pandas as pd
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -12,7 +11,7 @@ from sklearn.metrics import mean_absolute_error as mae
 from sklearn.metrics import mean_squared_error as mse
 from sklearn.model_selection import train_test_split as tts
 from tqdm import trange
-from whoosh import index, scoring, fields, qparser
+from whoosh import fields, index, qparser, scoring
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(asctime)s - %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger()
@@ -21,11 +20,6 @@ datapath = os.path.dirname(os.path.abspath(sys.argv[0])) + '/data/'
 conversations = json.load(open(datapath + 'MovieSent.json', 'r'))
 movie_ids = json.load(open(datapath + 'films_rt_ids.json', 'r'))
 movies_features = json.load(open(datapath + 'films_features.json', 'r'))
-try:
-    critics_reviews = pd.read_table(datapath+'reviews.tsv.tar.gz', compression='gzip').drop(['fresh'], axis=1).dropna()
-except FileNotFoundError:
-    logger.error('Critics reviews not found. Please, run `scraping_critics.py`')
-    exit()
 
 bc = SentenceTransformer('stsb-roberta-large')
 
@@ -50,6 +44,7 @@ model_features = ['cf_score',
                   'meta_critics_score',
                   'meta_amount_critics',
                   'meta_amount_users']
+
 
 def timeit(func):
     def wrapper(*args, **kwargs):

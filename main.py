@@ -4,7 +4,6 @@ import math
 import os
 import pickle
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -16,8 +15,9 @@ from surprise import SVD, Dataset, KNNBaseline, Reader, SVDpp
 from tqdm import tqdm
 from tqdm.auto import tqdm as tqdm_pandas
 
-from model_utils import (bc, datapath, get_average_score, logger, movies_features, critics_reviews,
-                         model_features, searcher, timeit, whoosh_parser)
+from model_utils import (bc, datapath, get_average_score, logger,
+                         model_features, movies_features, searcher, timeit,
+                         whoosh_parser)
 
 seed = 42
 np.random.seed(42)
@@ -52,7 +52,7 @@ def get_movie_critic_representation(row):
 
 
 @timeit
-def train_cf(df, model='knn'):
+def train_cf(df, model='svdpp'):
     reader = Reader(rating_scale=(1, 5))
     logger.info('training '+model)
     if model == 'knn':
@@ -203,6 +203,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     outpath = f'{datapath}/../{args.directory}/'
 
+    critics_reviews = pd.read_table(datapath+'reviews.tsv.gz').drop(['fresh'], axis=1).dropna()
+
     df_users = pd.read_table(outpath+f'conversations_estimated.tsv')
     df_users = df_users[df_users['target movie_id'].isin(movies_features)]
 
@@ -225,22 +227,3 @@ if __name__ == "__main__":
         logger.info('Feature importances:')
         for score, feature in sorted(zip(model.feature_importances_, model_features), reverse=True):
             logger.info(f'{round(score, 4)} {feature}')
-
-    # _stat, p = stats.wilcoxon(X_test['cf_score'], X_test.apply(avg_audience, axis=1))
-    # logger.info(f'wilcoxon test p-value: avg_audience & gbdt: {p}')
-    # _stat, p = stats.wilcoxon(y_pred, X_test['cf_score'])
-    # logger.info(f'wilcoxon test p-value: cf & gbdt: {p}')
-
-    # rmses = {}
-    # ''' ablation '''
-    # for columns, name in zip([[], ['cf_score'], ['difference'], ['dot_product'], ['meta_audience_score', 'meta_critics_score', 'meta_date', 'meta_runtime', 'meta_amount_critics', 'meta_amount_users', 'meta_genre', 'meta_people', 'meta_description', 'meta_title']], ['full model', 'cf', 'diff', 'dot_product', 'meta']):
-
-    #     logger.info(name)
-    #     df_all_features = pd.read_table(df_all_features_path)
-
-    #     X, y = df_all_features[[i for i in model_features if i not in columns]+['target movie_id']], df_all_features['target score']
-    #     model = GBRT(n_estimators=10, max_depth=3)
-    #     rmses[name] = get_average_score(X.drop('target movie_id', axis=1), y, model, n=100)
-
-    # plt.boxplot(rmses.values(), labels=rmses.keys())
-    # plt.savefig(outpath+'ablation.png')
