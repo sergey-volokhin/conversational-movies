@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(asctime)s - %(m
 logger = logging.getLogger()
 
 datapath = os.path.dirname(os.path.abspath(sys.argv[0])) + '/data/'
-conversations = json.load(open(datapath + 'annotated_conversations.json', 'r'))
+conversations = json.load(open(datapath + 'MovieSent.json', 'r'))
 movie_ids = json.load(open(datapath + 'films_rt_ids.json', 'r'))
 movies_features = json.load(open(datapath + 'films_features.json', 'r'))
 try:
