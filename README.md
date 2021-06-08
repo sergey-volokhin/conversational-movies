@@ -1,6 +1,6 @@
 # Conversational Collaborative Filtering using External Data and MovieSent dataset
 
-Code and data from the NAACL'21 short paper "You Sound Like Someone Who Watches Drama Movies: Towards Predicting Movie Preferences from Conversational Interactions" by Volokhin et al.
+Code and data from the NAACL'21 short paper ["You Sound Like Someone Who Watches Drama Movies: Towards Predicting Movie Preferences from Conversational Interactions" by Volokhin et al.](https://www.aclweb.org/anthology/2021.naacl-main.246/)
 
 *MovieSent* - dataset containing 489 movie-related conversations with fine-grained user sentiment labels about each mentioned movie.
 Conversations are in the [MovieSent.json](data/MovieSent.json) file.
