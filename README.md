@@ -10,6 +10,6 @@ Reviews were collected in April 2020. Initially a list of critics is compiled fr
 To run the model:
 
 1) Install [requirements.txt](requirements.txt)
-2) Run [index.py](index.py) to create an index of reviews based on the [reviews.tsv.gz](data/reviews.tsv.gz) file.
+2) Run [indexing.py](indexing.py) to create an index of reviews based on the [reviews.tsv.gz](data/reviews.tsv.gz) file.
 3) Run [sentiment_estimation.py](sentiment_estimation.py) to create a sentiment estimation model.
 4) Run [main.py](main.py) for the final model. Training of CF model will occur at the same time, and can take a long time for a SVDpp model (KNN is much faster, ~20 seconds, if you just want to check if the code works).
