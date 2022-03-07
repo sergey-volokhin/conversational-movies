@@ -1,5 +1,4 @@
 import argparse
-import json
 import math
 import os
 import pickle
@@ -16,13 +15,11 @@ from tqdm import tqdm
 from tqdm.auto import tqdm as tqdm_pandas
 
 from model_utils import (bc, datapath, get_average_score, logger,
-                         model_features, movies_features, searcher, timeit,
-                         whoosh_parser)
-
-seed = 42
-np.random.seed(42)
+                         model_features, movies_features, searcher, seed,
+                         timeit, whoosh_parser)
 
 num_bert_feats = 1024
+
 
 def get_ranked_critics(movie_id, text):
     ''' returns dict of ranked according to text critics with BM25 weights '''
@@ -52,9 +49,9 @@ def get_movie_critic_representation(row):
 
 
 @timeit
-def train_cf(df, model='svdpp'):
+def train_cf(df, model):
     reader = Reader(rating_scale=(1, 5))
-    logger.info('training '+model)
+    logger.info('training ' + model)
     if model == 'knn':
         algo = KNNBaseline(sim_options={'name': 'cosine', 'user_based': True}, verbose=False)
     elif model == 'svd':
@@ -63,30 +60,30 @@ def train_cf(df, model='svdpp'):
         algo = SVDpp(n_factors=500)
     data_train = Dataset.load_from_df(df, reader)
     algo.fit(data_train.build_full_trainset())
-    pickle.dump(algo, open(outpath + 'cf.pkl', 'wb'))
+    pickle.dump(algo, open(outpath + f'cf_{model}.pkl', 'wb'))
 
 
 def convert_to_cf_matrix(df):
     ''' converts df_users into a standard records cf matrix '''
     result = pd.DataFrame()
     for number in ['first', 'second']:
-        temp = df[['critic_id', number+' movie_id', number+' score']].drop_duplicates()
-        temp = temp.rename(columns={number+' movie_id': 'movie_id', number+' score': 'score'})
+        temp = df[['critic_id', number + ' movie_id', number + ' score']].drop_duplicates()
+        temp = temp.rename(columns={number + ' movie_id': 'movie_id', number + ' score': 'score'})
         result = result.append(temp)
     return result
 
 
-def get_cf_feature(df, regenerate):
-    if not os.path.exists(outpath+'cf.pkl') or regenerate:
+def get_cf_feature(df, model, regenerate):
+    if not os.path.exists(outpath + 'cf.pkl') or regenerate:
         df_users_cf = convert_to_cf_matrix(df)
         df_cf = critics_reviews[['critic_id', 'movie_id', 'score']].append(df_users_cf).reset_index(drop=True).dropna()
-        train_cf(df_cf)
-    cf = pickle.load(open(outpath+'cf.pkl', 'rb'))
+        train_cf(df_cf, model)
+    cf = pickle.load(open(outpath + f'cf_{model}.pkl', 'rb'))
 
     df['cf_score'] = df.apply(lambda x: cf.predict(x['critic_id'], x['target movie_id']).est, axis=1)
     logger.info(f"RMSE for CF: {math.sqrt(mse(df['cf_score'], df['target score']))}")
     logger.info(f" MAE for CF: {mae(df['cf_score'], df['target score'])}")
-    df.to_csv(outpath+'conversations_w_cf.tsv', sep='\t', index=False)
+    df.to_csv(outpath + 'conversations_w_cf.tsv', sep='\t', index=False)
 
 
 @timeit
@@ -103,7 +100,7 @@ def get_users_emb(df, each_turn='full_text'):
         user_emb = pd.DataFrame.from_records(embedded, columns=columns)
     else:
         user_emb = pd.DataFrame.from_records(bc.encode(df['review'].to_list(), show_progress_bar=False), columns=columns)
-    user_emb.to_csv(outpath+f'users_emb_{each_turn}.tsv', sep='\t', index=False)
+    user_emb.to_csv(outpath + f'users_emb_{each_turn}.tsv', sep='\t', index=False)
 
 
 @timeit
@@ -113,7 +110,7 @@ def get_critics_emb(df):
     df_tmp = df.rename(columns={'target movie_id': 'movie_id'}).reset_index(drop=True)
     df_tmp = df_tmp.progress_apply(get_movie_critic_representation, axis=1)
     critics_emb = pd.DataFrame.from_records(df_tmp, columns=[f'critics_emb_{i}' for i in range(num_bert_feats)])
-    critics_emb.to_csv(outpath+f'critics_emb.tsv', sep='\t', index=False)
+    critics_emb.to_csv(outpath + 'critics_emb.tsv', sep='\t', index=False)
 
 
 @timeit
@@ -155,20 +152,20 @@ def get_metadata_features(df, user_vectors):
     return pd.DataFrame.from_records(new_feats)
 
 
-def get_all_features(df_users, regenerate=False):
+def get_all_features(df_users, model, regenerate=False):
     """ prepare a dataframe with all the features """
 
     logger.info('generating data')
-    if not os.path.exists(outpath+'conversations_w_cf.tsv') or regenerate:
-        get_cf_feature(df_users, regenerate)
-    if not os.path.exists(outpath+f'users_emb_full_text.tsv') or regenerate:
+    if not os.path.exists(outpath + 'conversations_w_cf.tsv') or regenerate:
+        get_cf_feature(df_users, model, regenerate)
+    if not os.path.exists(outpath + 'users_emb_full_text.tsv') or regenerate:
         get_users_emb(df_users)
-    if not os.path.exists(outpath+f'critics_emb.tsv') or regenerate:
+    if not os.path.exists(outpath + 'critics_emb.tsv') or regenerate:
         get_critics_emb(df_users)
 
-    df_users = pd.read_table(outpath+'conversations_w_cf.tsv')
-    user_vectors = pd.read_table(outpath+f'users_emb_full_text.tsv').values.tolist()
-    critics_vectors = pd.read_table(outpath+f'critics_emb.tsv').values.tolist()
+    df_users = pd.read_table(outpath + 'conversations_w_cf.tsv')
+    user_vectors = pd.read_table(outpath + 'users_emb_full_text.tsv').values.tolist()
+    critics_vectors = pd.read_table(outpath + 'critics_emb.tsv').values.tolist()
 
     earth_movers_distance = [[stats.wasserstein_distance(critics_vectors[i], user)] for i, user in enumerate(user_vectors)]
     dot_product = [[np.dot(user, np.transpose(critics_vectors[i]))] for i, user in enumerate(user_vectors)]
@@ -200,28 +197,33 @@ if __name__ == "__main__":
     parser.add_argument('-f', '--feature-importances',
                         help='whether to print feature importances of the model',
                         action='store_true')
+    parser.add_argument('--model',
+                        help='which cf model to use',
+                        choices=['svd', 'svdpp', 'knn'],
+                        default='svdpp')
+
     args = parser.parse_args()
     outpath = f'{datapath}/../{args.directory}/'
 
-    critics_reviews = pd.read_table(datapath+'reviews.tsv.gz').drop(['fresh'], axis=1).dropna()
+    critics_reviews = pd.read_table(datapath + 'reviews.tsv.gz').drop(['fresh'], axis=1).dropna()
 
-    df_users = pd.read_table(outpath+f'conversations_estimated.tsv')
+    df_users = pd.read_table(outpath + 'conversations_estimated.tsv')
     df_users = df_users[df_users['target movie_id'].isin(movies_features)]
 
-    df_all_features_path = outpath+f'conversations_w_features.tsv'
+    df_all_features_path = outpath + 'conversations_w_features.tsv'
     if not os.path.exists(df_all_features_path) or args.regenerate:
-        get_all_features(df_users, args.regenerate)
+        get_all_features(df_users, args.model, args.regenerate)
     df_all_features = pd.read_table(df_all_features_path)
 
     model = GBRT(n_estimators=10, max_depth=3)
-    X, y = df_all_features[model_features+['target movie_id']], df_all_features['target score']
+    X, y = df_all_features[model_features + ['target movie_id']], df_all_features['target score']
     get_average_score(X.drop('target movie_id', axis=1), y, model, n=100)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=seed)
     model.fit(X_train.drop('target movie_id', axis=1), y_train)
     y_pred = model.predict(X_test.drop('target movie_id', axis=1))
     logger.info(f'RMSE: {math.sqrt(mse(y_test, y_pred))}')
     logger.info(f' MAE: {mae(y_test, y_pred)}')
-    pickle.dump(model, open(outpath + f'gbdt.pkl', 'wb'))
+    pickle.dump(model, open(outpath + 'gbdt.pkl', 'wb'))
 
     if args.feature_importances:
         logger.info('Feature importances:')

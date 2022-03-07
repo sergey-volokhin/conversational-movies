@@ -8,21 +8,22 @@ from model_utils import datapath, logger, schema, timeit
 
 
 @timeit
-def indexing(df, index_name=datapath+'index'):
+def indexing(df, index_name=datapath + 'index'):
     os.makedirs(index_name, exist_ok=True)
     ix = index.create_in(index_name, schema)
     writer = ix.writer()
     logger.info('Indexing reviews')
-    for _, review in tqdm(df.iterrows(), total=df.shape[0]):
+    for _, review in tqdm(df.iterrows(), total=df.shape[0], desc='adding reviews into index'):
         writer.add_document(
             movie_id=review['movie_id'],
             critic_id=review['critic_id'],
             review=review['review'],
             score=review['score'])
+    logger.info('Committing reviews. This will take a while')
     writer.commit()
 
 
 if __name__ == '__main__':
 
-    df = pd.read_table(datapath+'reviews.tsv.gz')
+    df = pd.read_table(datapath + 'reviews.tsv.gz')
     indexing(df)

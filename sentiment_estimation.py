@@ -143,7 +143,7 @@ def create_sentiment_trainset(file):
 def train_estimator(sentiment_df):
 
     # embed the train dataset
-    emb_path = outpath+f'trainset_embeddings.txt'
+    emb_path = outpath + 'trainset_embeddings.txt'
     if args.regenerate or not os.path.exists(model_path):
         logger.info('Calculating embeddings')
         sentiment_estimation_embeddings = bc.encode(sentiment_df['text'].to_list())
@@ -152,21 +152,21 @@ def train_estimator(sentiment_df):
     sentiment_estimation_embeddings = np.loadtxt(emb_path)
 
     # remove those few conversations which have score 3 to reduce noise
-    indexes = sentiment_df[sentiment_df['score']==3].index.to_list()
-    sentiment_df = sentiment_df[sentiment_df['score']!=3]
+    indexes = sentiment_df[sentiment_df['score'] == 3].index.to_list()
+    sentiment_df = sentiment_df[sentiment_df['score'] != 3]
     sentiment_estimation_embeddings = [i for ind, i in enumerate(sentiment_estimation_embeddings) if ind not in indexes]
 
     logger.info('Fitting the estimator')
-    X_train, X_test, y_train, y_test = tts(sentiment_estimation_embeddings, sentiment_df['score'], test_size=0.1)
-    model = RFR(n_estimators=500, max_depth=10)
-    model.fit(X_train, y_train)
+    x_train, x_test, y_train, y_test = tts(sentiment_estimation_embeddings, sentiment_df['score'], test_size=0.1)
+    model = RFR(n_estimators=500, max_depth=10, n_jobs=-1)
+    model.fit(x_train, y_train)
     logger.info('Estimator fitted')
 
     pickle.dump(model, open(model_path, 'wb'))
-    y_pred = model.predict(X_test)
+    y_pred = model.predict(x_test)
     logger.info(f'sentiment estimator RMSE: {round(math.sqrt(mse(y_test, y_pred)), 3)}')
     logger.info(f'sentiment estimator  MAE: {round(mae(y_test, y_pred), 3)}')
-    logger.info(f'sentiment estimator  R^2: {round(model.score(X_test, y_test), 3)}')
+    logger.info(f'sentiment estimator  R^2: {round(model.score(x_test, y_test), 3)}')
 
 
 if __name__ == '__main__':
@@ -183,8 +183,8 @@ if __name__ == '__main__':
 
     df_conv = get_gbdt_conversations(conversations)
     outpath = f'{datapath}/../{args.directory}/'
-    model_path = outpath+f'estimator.pickle'
-    trainset_path = outpath+f'trainset.tsv'
+    model_path = outpath + 'estimator.pickle'
+    trainset_path = outpath + 'trainset.tsv'
 
     os.makedirs(outpath, exist_ok=True)
     if args.regenerate or not os.path.exists(model_path):
@@ -201,4 +201,4 @@ if __name__ == '__main__':
     logger.info('Encoding done')
 
     df_conv.drop(['first text', 'second text'], axis=1, inplace=True)
-    df_conv.to_csv(outpath+f'../conversations_estimated.tsv', sep='\t', index=False)
+    df_conv.to_csv(outpath + '../conversations_estimated.tsv', sep='\t', index=False)

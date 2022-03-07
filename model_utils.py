@@ -13,6 +13,9 @@ from sklearn.model_selection import train_test_split as tts
 from tqdm import trange
 from whoosh import fields, index, qparser, scoring
 
+seed = 42
+np.random.seed(seed)
+
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(asctime)s - %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger()
 
@@ -24,12 +27,15 @@ movies_features = json.load(open(datapath + 'films_features.json', 'r'))
 bc = SentenceTransformer('stsb-roberta-large')
 
 schema = fields.Schema(movie_id=fields.KEYWORD(stored=True, scorable=True),
-                critic_id=fields.KEYWORD(stored=True, scorable=True),
-                score=fields.NUMERIC(stored=True),
-                review=fields.TEXT(stored=True),
-                freshness=fields.KEYWORD(scorable=True))
+                       critic_id=fields.KEYWORD(stored=True, scorable=True),
+                       score=fields.NUMERIC(stored=True),
+                       review=fields.TEXT(stored=True),
+                       freshness=fields.KEYWORD(scorable=True))
 whoosh_parser = qparser.MultifieldParser(['movie_id', 'review'], schema=schema)
-searcher = index.open_dir(datapath + 'index').searcher(weighting=scoring.BM25F)
+try:
+    searcher = index.open_dir(datapath + 'index').searcher(weighting=scoring.BM25F)
+except index.EmptyIndexError:
+    logger.warn(f'No index found in {datapath}index')
 
 model_features = ['cf_score',
                   'difference',
@@ -55,13 +61,13 @@ def timeit(func):
     return wrapper
 
 
-def get_average_score(X, y, model, n=100):
+def get_average_score(x, y, model, n=100):
     rmses = []
     maes = []
     for _ in trange(n, leave=False, desc='running models'):
-        X_train, X_test, y_train, y_test = tts(X, y, test_size=0.1)
-        model.fit(X_train, y_train)
-        predictions = model.predict(X_test)
+        x_train, x_test, y_train, y_test = tts(x, y, test_size=0.1)
+        model.fit(x_train, y_train)
+        predictions = model.predict(x_test)
         rmses.append(math.sqrt(mse(y_test, predictions)))
         maes.append(mae(y_test, predictions))
     rmses = np.array(rmses)
