@@ -1,9 +1,8 @@
-Whoosh==2.7.4
-sentence_transformers==1.0.4
-pandas==1.2.3
-scipy==1.6.2
-tqdm==4.59.0
-scikit_surprise==1.1.1
-numpy==1.20.2
-scikit_learn==0.24.1
-surprise==0.1
+Whoosh
+sentence_transformers
+pandas
+numpy
+scipy
+tqdm
+scikit_surprise
+scikit_learn
