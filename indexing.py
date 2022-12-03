@@ -5,6 +5,14 @@ import pandas as pd
 from tqdm import tqdm
 from whoosh import fields, index, qparser, scoring
 
+schema = fields.Schema(
+    movie_id=fields.KEYWORD(stored=True, scorable=True),
+    critic_id=fields.KEYWORD(stored=True, scorable=True),
+    score=fields.NUMERIC(stored=True),
+    review=fields.TEXT(stored=True),
+    freshness=fields.KEYWORD(scorable=True)
+)
+
 
 def create_index(df, index_name, schema):
     os.makedirs(index_name, exist_ok=True)
@@ -23,16 +31,10 @@ def create_index(df, index_name, schema):
 
 
 def load_index(path, data):
-    schema = fields.Schema(
-        movie_id=fields.KEYWORD(stored=True, scorable=True),
-        critic_id=fields.KEYWORD(stored=True, scorable=True),
-        score=fields.NUMERIC(stored=True),
-        review=fields.TEXT(stored=True),
-        freshness=fields.KEYWORD(scorable=True)
-    )
+    path = os.path.join(path, 'index')
     whoosh_parser = qparser.MultifieldParser(['movie_id', 'review'], schema=schema)
     try:
-        searcher = index.open_dir(os.path.join(path, 'index')).searcher(weighting=scoring.BM25F)
+        searcher = index.open_dir(path).searcher(weighting=scoring.BM25F)
     except index.EmptyIndexError:
         searcher = create_index(data, path, schema)
     return whoosh_parser, searcher
@@ -41,4 +43,4 @@ def load_index(path, data):
 if __name__ == '__main__':
 
     df = pd.read_table('reviews.tsv')
-    create_index(df)
+    create_index(df, index_name='data/index', schema=schema)

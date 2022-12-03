@@ -142,15 +142,15 @@ class MyDataset:
         entities = []
         line = {'critic_id': dialog['conversationId']}
         for utterance in dialog['utterances']:
-            cur_ents = entities_in_utterance(utterance)
 
+            cur_ents = entities_in_utterance(utterance)
             if utterance['speaker'] != 'USER' or 'segments' not in utterance or len(cur_ents) != 1:
                 continue
 
             movie_id = cur_ents[0]
             movie_sentiment = sentiment_to_score(get_sentiment_from_utterance(utterance))
             valid_id = movie_id not in entities + self.zero_reviewed_movies and movie_id in self.movie_ids
-            valid_score = len(entities) < 2 or not np.isnan(movie_sentiment)  # ? why OR?
+            valid_score = len(entities) < 2 or not np.isnan(movie_sentiment)
 
             if valid_id and valid_score:
                 line[f'movie_{len(entities)+1}'] = movie_id
@@ -166,16 +166,15 @@ class MyDataset:
                 entities.append(movie_id)
 
     def load_all_features(self) -> pd.DataFrame:
-        if not self.regenerate and os.path.exists(self.get_path('all_features.tsv')):
-            self.data = pd.read_table(self.get_path('all_features.tsv'))
+        path = self.get_path('all_features.tsv')
+        if not self.regenerate and os.path.exists(path):
+            self.data = pd.read_table(path)
 
         os.makedirs(self.outpath, exist_ok=True)
         df_cf = self.get_cf_feature()
         df_adaptive = self.get_adaptive_features(df_cf)
         self.data = self.get_metadata_features(df_adaptive)
-        self.data.to_csv(self.get_path('all_features.tsv'), sep='\t', index=False)
-        # for file in ['dialogs_embeddings.txt', 'dialogs_estimated.tsv', 'dialogs_w_cf']:
-        #     os.system(f'rm -f {self.get_path(file)}')
+        self.data.to_csv(path, sep='\t', index=False)
 
     def get_users_emb(self, df, each_turn='full_text') -> pd.DataFrame:
         '''
@@ -184,8 +183,9 @@ class MyDataset:
                 each_turn: takes the average embedding of turns' embeddings
                 full_text: takes the embedding of all text concatenated
         '''
-        if not self.regenerate and os.path.exists(self.get_path(f'users_emb_{each_turn}.tsv')):
-            return pd.read_table(self.get_path(f'users_emb_{each_turn}.tsv')).values.tolist()
+        path = self.get_path(f'users_emb_{each_turn}.tsv')
+        if not self.regenerate and os.path.exists(path):
+            return pd.read_table(path).values.tolist()
 
         self.logger.info('getting user embedding')
         columns = [f'user_{i}' for i in range(self.num_bert_feats)]
@@ -202,13 +202,14 @@ class MyDataset:
                 ),
                 columns=columns
             )
-        user_emb.to_csv(self.get_path(f'users_emb_{each_turn}.tsv'), sep='\t', index=False)
+        user_emb.to_csv(path, sep='\t', index=False)
         return user_emb.values.tolist()
 
     def get_critics_emb(self, df: pd.DataFrame) -> pd.DataFrame:
         ''' represent critics are the average of their reviews '''
-        if not self.regenerate and os.path.exists(self.get_path('critics_emb.tsv')):
-            return pd.read_table(self.get_path('critics_emb.tsv')).values.tolist()
+        path = self.get_path('critics_emb.tsv')
+        if not self.regenerate and os.path.exists(path):
+            return pd.read_table(path).values.tolist()
 
         self.logger.info('getting critic embedding')
         tqdm_pandas.pandas(desc='critics_emb')
@@ -217,7 +218,7 @@ class MyDataset:
             df_tmp.progress_apply(self.get_movie_critic_representation, axis=1),
             columns=[f'critics_emb_{i}' for i in range(self.num_bert_feats)]
         )
-        critics_emb.to_csv(self.get_path('critics_emb.tsv'), sep='\t', index=False)
+        critics_emb.to_csv(path, sep='\t', index=False)
         return critics_emb.values.tolist()
 
     def get_movie_critic_representation(self, row):
@@ -259,8 +260,9 @@ class MyDataset:
         self.u_vectors = self.get_users_emb(df)
         self.critics_vectors = self.get_critics_emb(df)
 
-        if not self.regenerate and os.path.exists(self.get_path('adaptive_features.tsv')):
-            return pd.read_table(self.get_path('adaptive_features.tsv'))
+        path = self.get_path('adaptive_features.tsv')
+        if not self.regenerate and os.path.exists(path):
+            return pd.read_table(path)
 
         earth_movers_df = []
         dot_prod_df = []
@@ -271,7 +273,7 @@ class MyDataset:
         dot_prod_df = pd.DataFrame.from_records(dot_prod_df, columns=['dot_product'])
 
         features_df = pd.concat([df.reset_index(drop=True), earth_movers_df, dot_prod_df], axis=1)
-        features_df.to_csv(self.get_path('adaptive_features.tsv'), sep='\t', index=False)
+        features_df.to_csv(path, sep='\t', index=False)
         return features_df
 
     def embed_text(self, sentences, file):
@@ -322,8 +324,9 @@ class MyDataset:
         use utterances from conversations that can't be used
         for the final model to train sentiment estimator on them
         """
-        if not self.regenerate and os.path.exists(self.get_path('trainset.tsv')):
-            return pd.read_table(self.get_path('trainset.tsv'))
+        path = self.get_path('trainset.tsv')
+        if not self.regenerate and os.path.exists(path):
+            return pd.read_table(path)
 
         forbidden_pairs = []
         for i in range(1, 4):
@@ -343,14 +346,15 @@ class MyDataset:
                         line['text'] = get_context(dialog, utterance)
                         list_of_lines.append(line)
         trainset = pd.DataFrame.from_records(list_of_lines)[['text', 'score']]
-        trainset.to_csv(self.get_path('trainset.tsv'), sep='\t', index=False)
+        trainset.to_csv(path, sep='\t', index=False)
         return trainset
 
     def train_sentiment_model(self):
         ''' train a sentiment model with unused conversations '''
 
-        if not self.regenerate and os.path.exists(self.get_path('estimator.pkl')):
-            return pickle.load(open(self.get_path('estimator.pkl'), 'rb'))
+        path = self.get_path('estimator.pkl')
+        if not self.regenerate and os.path.exists(path):
+            return pickle.load(open(path, 'rb'))
 
         sentiment_df = self.create_sentiment_trainset()
         sentiment_embeddings = self.embed_text(
@@ -377,7 +381,7 @@ class MyDataset:
         estimator.fit(x_train, y_train)
         self.logger.info('Estimator fitted')
 
-        pickle.dump(estimator, open(self.get_path('estimator.pkl'), 'wb'))
+        pickle.dump(estimator, open(path, 'wb'))
 
         y_pred = estimator.predict(x_test)
         self.logger.info('sentiment estimator results:')
@@ -426,9 +430,9 @@ class MyDataset:
 
     def get_metadata_features(self, df: pd.DataFrame):
 
-        meta_path = self.get_path('metadata_features.tsv')
-        if not self.regenerate and os.path.exists(meta_path):
-            return pd.read_table(meta_path)
+        path = self.get_path('metadata_features.tsv')
+        if not self.regenerate and os.path.exists(path):
+            return pd.read_table(path)
 
         feats = []
         for (_, row), user in tqdm(
@@ -439,7 +443,7 @@ class MyDataset:
             feats.append(self.get_single_meta(row, user))
 
         feats_df = pd.DataFrame.from_records(feats)
-        feats_df.to_csv(self.get_path('metadata_features.tsv'), index=False, sep='\t')
+        feats_df.to_csv(path, index=False, sep='\t')
         return feats_df
 
     def get_single_meta(self, row, user):
