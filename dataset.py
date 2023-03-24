@@ -2,6 +2,7 @@ import json
 import math
 import os
 import pickle
+import sys
 
 import numpy as np
 import pandas as pd
@@ -71,7 +72,7 @@ def get_sentiment_from_utterance(utterance):
             intial_sentiment = segment['annotations'][0]['sentiment']
             if np.isnan(intial_sentiment[0]):
                 return intial_sentiment[-1]
-            elif np.isnan(intial_sentiment[-1]):
+            if np.isnan(intial_sentiment[-1]):
                 return intial_sentiment[0]
             return sum(intial_sentiment) / len(intial_sentiment)
 
@@ -91,14 +92,14 @@ class MyDataset:
         'meta_audience_score',
         'meta_critics_score',
         'meta_amount_critics',
-        'meta_amount_users'
+        'meta_amount_users',
     ]
 
     def __init__(self, args):
 
         self.logger = args.logger
         self.outpath = args.outpath
-        self.datapath = os.path.join(os.path.dirname(self.outpath), 'data')
+        self.datapath = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), 'data')
         self.regenerate = args.regenerate
         self.cf_type = args.cf_type
         self.seed = args.seed
@@ -180,7 +181,8 @@ class MyDataset:
     def get_users_emb(self, df, each_turn='full_text', sep='|||') -> pd.DataFrame:
         '''
             embed the user conversations
-            optional:
+
+            optional args:
                 each_turn: takes the average embedding of turns' embeddings
                 full_text: takes the embedding of all text concatenated
         '''
@@ -199,48 +201,52 @@ class MyDataset:
                 self.bc.encode(
                     df['review'].to_list(),
                     show_progress_bar=False,
-                    batch_size=1024
+                    batch_size=1024,
                 ),
-                columns=columns
+                columns=columns,
             )
         user_emb.to_csv(path, sep='\t', index=False)
         return user_emb.values.tolist()
 
     def get_critics_emb(self, df: pd.DataFrame) -> pd.DataFrame:
         ''' represent critics are the average of their reviews '''
-        path = self.get_path('critics_emb.tsv')
-        if not self.regenerate and os.path.exists(path):
-            return pd.read_table(path).values.tolist()
+        critics_path = self.get_path('critics_emb.tsv')
+        if not self.regenerate and os.path.exists(critics_path):
+            return pd.read_table(critics_path).values.tolist()
 
         self.logger.info('getting critic embedding')
         tqdm_pandas.pandas(desc='critics_emb', dynamic_ncols=True)
         df_tmp = df.rename(columns={'movie_3': 'movie_id'}).reset_index(drop=True)
         critics_emb = pd.DataFrame.from_records(
             df_tmp.progress_apply(self.get_movie_critic_representation, axis=1),
-            columns=[f'critics_emb_{i}' for i in range(self.num_bert_feats)]
+            columns=[f'critics_emb_{i}' for i in range(self.num_bert_feats)],
         )
-        critics_emb.to_csv(path, sep='\t', index=False)
+        critics_emb.to_csv(critics_path, sep='\t', index=False)
         return critics_emb.values.tolist()
 
     def get_movie_critic_representation(self, row):
         '''
-        returns movie representation:
-            weighted (by BM25 scores) average of critics' reviews for that movie
+        returns movie textual representation based on user review:
+            weighted (by BM25 scores) average of most similar to user critics' reviews for that movie
         '''
         critics_dict = self.get_ranked_critics(row.movie_id, row.review)
+
+        if not critics_dict:
+            return np.zeros(self.num_bert_feats)
+
         subdf = self.reviews[self.reviews['movie_id'] == row.movie_id]
         subsubdf = subdf[subdf['critic_id'].isin(critics_dict.keys())]
-        if len(critics_dict) > 0:
-            encodings = self.bc.encode(subsubdf['review'].to_list(), show_progress_bar=False, batch_size=1024)
-            weights = [critics_dict[name] for name in subsubdf['critic_id'].to_list()]
-            weights = np.array(weights).reshape((len(weights), 1))
-            return (encodings * weights).mean(axis=0)  # average of reviews for one critic
-        return np.zeros(self.num_bert_feats)
+        encodings = self.bc.encode(subsubdf['review'].to_list(), show_progress_bar=False, batch_size=1024)
+        weights = [critics_dict[name] for name in subsubdf['critic_id'].to_list()]
+        weights = np.array(weights).reshape((len(weights), 1))
+        return (encodings * weights).mean(axis=0)  # average of reviews for one critic
 
     def get_ranked_critics(self, movie_id, text):
         '''
-        returns critics most similar to users according to BM25:
+        returns critics most similar to the conversation according to BM25:
             {critic_id: BM25_score, ...}
+
+        as well as the weighted average of critics' scores from CF
         '''
         query = self.parser.parse(f'movie_id:{movie_id} AND (review:' + ' OR review:'.join(text.split()) + ')')
         initial_list = [(i['critic_id'], i.score) for i in self.searcher.search(query, limit=None)]
@@ -253,7 +259,7 @@ class MyDataset:
     def get_adaptive_features(self, df) -> pd.DataFrame:
         '''
         calculate features related to the distance between user and critics:
-       `     retrieve the most similar to user critics with scores
+            retrieve the most similar to user critics with scores
             represent user as a weighted average of critics embeddings (weights are BM25 scores)
             calculate different metrics between that user representation and the conversation embeddings
         '''
@@ -331,7 +337,7 @@ class MyDataset:
 
         forbidden_pairs = []
         for i in range(1, 4):
-            forbidden_pairs += [list(i) for i in self.dialogs[['critic_id', f'movie_{i}']].values]
+            forbidden_pairs += [list(j) for j in self.dialogs[['critic_id', f'movie_{i}']].values]
 
         list_of_lines = []
         for dialog in self.raw_dialogs:
@@ -360,7 +366,7 @@ class MyDataset:
         sentiment_df = self.create_sentiment_trainset()
         sentiment_embeddings = self.embed_text(
             sentiment_df['text'].to_list(),
-            self.get_path('trainset_embeddings.txt')
+            self.get_path('trainset_embeddings.txt'),
         )
 
         # remove those few conversations which have score 3 to reduce noise
@@ -379,7 +385,7 @@ class MyDataset:
             n_estimators=500,
             max_depth=10,
             n_jobs=-1,
-            random_state=self.seed
+            random_state=self.seed,
         )
         estimator.fit(x_train, y_train)
         self.logger.info('Estimator fitted')
@@ -405,12 +411,13 @@ class MyDataset:
         # estimate scores for unseen movies using CF model
         dialogs_w_cf_path = self.get_path('dialogs_w_cf.tsv')
         if not self.regenerate and os.path.exists(dialogs_w_cf_path):
+            self.cf = pickle.load(open(self.get_path(f'cf_{self.cf_type}.pkl'), 'rb'))
             return pd.read_table(dialogs_w_cf_path)
 
         estimator = self.train_sentiment_model()
         embeddings = self.embed_text(
             self.dialogs['text_1'].tolist() + self.dialogs['text_2'].tolist(),
-            self.get_path('dialogs_embeddings.txt')
+            self.get_path('dialogs_embeddings.txt'),
         )
 
         # calculate the scores for movies in conversations using the estimator
@@ -468,7 +475,7 @@ class MyDataset:
             ', '.join(current_movie_features['genre']),
             ', '.join(current_movie_features['people'][:10]),
             current_movie_features['description'],
-            current_movie_features['title']
+            current_movie_features['title'],
         ]
         for i in range(len(to_encode)):
             if len(to_encode[i]) == 0:
