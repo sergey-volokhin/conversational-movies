@@ -35,11 +35,11 @@ def entities_in_utterance(utterance):
     return list(ents)
 
 
-def get_context(dialog, utterance):
+def get_context(dialog, utterance, sep='|||'):
     ''' append previous turn to current utterance to create context '''
     prev_utterance = dialog['utterances'][utterance['index'] - 1]
     if utterance['index'] > 0 and prev_utterance['speaker'] == 'ASSISTANT':
-        return prev_utterance['text'] + ' ||| ' + utterance['text']
+        return prev_utterance['text'] + f' {sep} ' + utterance['text']
     return utterance['text']
 
 
@@ -51,7 +51,7 @@ def sentiment_to_score(x):
         return np.nan
 
 
-def merge_utts(utterances):
+def merge_utts(utterances, sep='|||'):
     """ merge utterances from the same speaker that apper in a row """
     cur_agent = utterances[0]['speaker']
     result = ''
@@ -59,7 +59,7 @@ def merge_utts(utterances):
         if utterance['speaker'] == cur_agent:
             result += ' ' + utterance['text']
         else:
-            result += ' ||| ' + utterance['text']
+            result += f' {sep} ' + utterance['text']
             cur_agent = utterance['speaker']
     return result.strip()
 
@@ -102,6 +102,7 @@ class MyDataset:
         self.regenerate = args.regenerate
         self.cf_type = args.cf_type
         self.seed = args.seed
+        self.sep = args.sep
         self.num_bert_feats = 768
         self.bc = SentenceTransformer(args.bert_model)
 
@@ -136,7 +137,7 @@ class MyDataset:
         '''
         for each user utterance with exactly one entity (movie):
             extract movie_id, golden score, text with context
-        return the first 3 results
+        return the first 3 results (2 train movie, 1 test movie)
         '''
 
         entities = []
@@ -156,10 +157,10 @@ class MyDataset:
                 line[f'movie_{len(entities)+1}'] = movie_id
                 line[f'score_{len(entities)+1}'] = movie_sentiment
                 if len(entities) != 2:
-                    line[f'text_{len(entities)+1}'] = get_context(dialog, utterance)
+                    line[f'text_{len(entities)+1}'] = get_context(dialog, utterance, sep=self.sep)
 
                 if len(entities) == 1:
-                    line['review'] = merge_utts(dialog['utterances'][:utterance['index'] + 1])
+                    line['review'] = merge_utts(dialog['utterances'][:utterance['index'] + 1], sep=self.sep)
                 elif len(entities) == 2:
                     return line
 
@@ -176,7 +177,7 @@ class MyDataset:
         self.data = self.get_metadata_features(df_adaptive)
         self.data.to_csv(path, sep='\t', index=False)
 
-    def get_users_emb(self, df, each_turn='full_text') -> pd.DataFrame:
+    def get_users_emb(self, df, each_turn='full_text', sep='|||') -> pd.DataFrame:
         '''
             embed the user conversations
             optional:
@@ -190,7 +191,7 @@ class MyDataset:
         self.logger.info('getting user embedding')
         columns = [f'user_{i}' for i in range(self.num_bert_feats)]
         if each_turn == 'each_turn':
-            to_embed = df['review'].progress_apply(lambda x: x.split(' ||| ')).to_list()
+            to_embed = df['review'].progress_apply(lambda x: x.split(f' {sep} ')).to_list()
             embedded = [self.bc.encode(i, show_progress_bar=False, batch_size=1024).mean(axis=0) for i in to_embed]
             user_emb = pd.DataFrame.from_records(embedded, columns=columns)
         else:
@@ -212,7 +213,7 @@ class MyDataset:
             return pd.read_table(path).values.tolist()
 
         self.logger.info('getting critic embedding')
-        tqdm_pandas.pandas(desc='critics_emb')
+        tqdm_pandas.pandas(desc='critics_emb', dynamic_ncols=True)
         df_tmp = df.rename(columns={'movie_3': 'movie_id'}).reset_index(drop=True)
         critics_emb = pd.DataFrame.from_records(
             df_tmp.progress_apply(self.get_movie_critic_representation, axis=1),
@@ -257,8 +258,8 @@ class MyDataset:
             calculate different metrics between that user representation and the conversation embeddings
         '''
 
-        self.u_vectors = self.get_users_emb(df)
-        self.critics_vectors = self.get_critics_emb(df)
+        self.u_vectors = self.get_users_emb(df, sep=self.sep)
+        self.c_vectors = self.get_critics_emb(df)
 
         path = self.get_path('adaptive_features.tsv')
         if not self.regenerate and os.path.exists(path):
@@ -267,8 +268,8 @@ class MyDataset:
         earth_movers_df = []
         dot_prod_df = []
         for i, user in enumerate(self.u_vectors):
-            earth_movers_df.append([wasserstein_distance(self.critics_vectors[i], user)])
-            dot_prod_df.append([np.dot(user, np.transpose(self.critics_vectors[i]))])
+            earth_movers_df.append([wasserstein_distance(self.c_vectors[i], user)])
+            dot_prod_df.append([np.dot(user, np.transpose(self.c_vectors[i]))])
         earth_movers_df = pd.DataFrame.from_records(earth_movers_df, columns=['difference'])
         dot_prod_df = pd.DataFrame.from_records(dot_prod_df, columns=['dot_product'])
 
@@ -343,7 +344,7 @@ class MyDataset:
                     if [dialog['conversationId'], movie_id] not in forbidden_pairs and not np.isnan(movie_sentiment):
                         line['movie_id'] = movie_id
                         line['score'] = movie_sentiment
-                        line['text'] = get_context(dialog, utterance)
+                        line['text'] = get_context(dialog, utterance, sep=self.sep)
                         list_of_lines.append(line)
         trainset = pd.DataFrame.from_records(list_of_lines)[['text', 'score']]
         trainset.to_csv(path, sep='\t', index=False)
@@ -358,14 +359,16 @@ class MyDataset:
 
         sentiment_df = self.create_sentiment_trainset()
         sentiment_embeddings = self.embed_text(
-            sentiment_df['text'].to_list(), self.get_path('trainset_embeddings.txt'))
+            sentiment_df['text'].to_list(),
+            self.get_path('trainset_embeddings.txt')
+        )
 
         # remove those few conversations which have score 3 to reduce noise
         indexes = sentiment_df[sentiment_df['score'] == 3].index.to_list()
         sentiment_df = sentiment_df[sentiment_df['score'] != 3]
         sentiment_embeddings = [i for ind, i in enumerate(sentiment_embeddings) if ind not in indexes]
 
-        self.logger.info('Fitting the estimator')
+        self.logger.info('Fitting sentiment estimator')
         x_train, x_test, y_train, y_test = tts(
             sentiment_embeddings,
             sentiment_df['score'],
@@ -438,7 +441,8 @@ class MyDataset:
         for (_, row), user in tqdm(
             zip(df.iterrows(), self.u_vectors),
             desc='metadata features',
-            total=df.shape[0]
+            total=df.shape[0],
+            dynamic_ncols=True,
         ):
             feats.append(self.get_single_meta(row, user))
 
